@@ -1,56 +1,158 @@
 /***************************************************************************//**
   @file         main.c
-  @author       Dipro Chowdhury
+  
   @date         Tuesday, 5 April 2016
 *******************************************************************************/
+#include <sys/wait.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 
-int main(int argc, char **argv)
-{
-  // Load config files Here
+/*
+  Function Declarations for builtin shell commands:
+ */
+int c_shell_cd(char **args);
+int c_shell_help(char **args);
+int c_shell_exit(char **args);
 
-  // call the loop function here
-  shell_loop();
+/*
+  List of builtin commands, followed by their corresponding functions.
+ */
+char *builtin_str[] = {
+  "cd",
+  "help",
+  "exit"
+};
 
-  // Perform any shutdown/cleanup.
+int (*builtin_func[]) (char **) = {
+  &c_shell_cd,
+  &c_shell_help,
+  &c_shell_exit
+};
 
-  return EXIT_SUCCESS;
+int c_shell_num_builtins() {
+  return sizeof(builtin_str) / sizeof(char *);
 }
 
-//Implementation of the loop
-void shell_loop(void)
-{
-  //To store Characters
-	char *line;
-  //The args are the strings passed
-    char **args;
-    
-    bool flag;  //To hold true or false
+/*
+  Builtin function implementations.
+*/
 
+/**
+   @brief Bultin command: change directory.
+   @param args List of args.  args[0] is "cd".  args[1] is the directory.
+   @return Always returns 1, to continue executing.
+ */
+int c_shell_cd(char **args)
+{
+  if (args[1] == NULL) {
+    fprintf(stderr, "c_shell: expected argument to \"cd\"\n");
+  } else {
+    if (chdir(args[1]) != 0) {
+      perror("c_shell");
+    }
+  }
+  return 1;
+}
+
+/**
+   @brief Builtin command: print help.
+   @param args List of args.  Not examined.
+   @return Always returns 1, to continue executing.
+ */
+int c_shell_help(char **args)
+{
+  int i;
+  printf("Simple c_shell\n");
+  printf("Type program names and arguments, and hit enter.\n");
+  printf("The following are built in:\n");
+
+  for (i = 0; i < c_shell_num_builtins(); i++) {
+    printf("  %s\n", builtin_str[i]);
+  }
+
+  printf("Use the man command for information on other programs.\n");
+  return 1;
+}
+
+/**
+   @brief Builtin command: exit.
+   @param args List of args.  Not examined.
+   @return Always returns 0, to terminate execution.
+ */
+int c_shell_exit(char **args)
+{
+  return 0;
+}
+
+/**
+  @brief Launch a program and wait for it to terminate.
+  @param args Null terminated list of arguments (including program).
+  @return Always returns 1, to continue execution.
+ */
+int c_shell_launch(char **args)
+{
+  pid_t pid, wpid;
+  int status;
+
+  pid = fork();
+  if (pid == 0) {
+    // Child process
+    if (execvp(args[0], args) == -1) {
+      perror("c_shell");
+    }
+    exit(EXIT_FAILURE);
+  } else if (pid < 0) {
+    // Error forking
+    perror("c_shell");
+  } else {
+    // Parent process
     do {
+      wpid = waitpid(pid, &status, WUNTRACED);
+    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+  }
 
-    printf("> ");
-    line = read_a_line();
-    args = split_a_line(line);
-    flag = execute(args);
-
-    free(line);
-    free(args);
-  } while (flag);
-    	
+  return 1;
 }
 
-
-//Implementation of read_a_line
-#define C_SHELL_BUFFERSIZE 1024
-char *read_a_line(void)
+/**
+   @brief Execute shell built-in or launch program.
+   @param args Null terminated list of arguments.
+   @return 1 if the shell should continue running, 0 if it should terminate
+ */
+int c_shell_execute(char **args)
 {
-  int bufsize = C_SHELL_BUFFERSIZE;
+  int i;
+
+  if (args[0] == NULL) {
+    // An empty command was entered.
+    return 1;
+  }
+
+  for (i = 0; i < c_shell_num_builtins(); i++) {
+    if (strcmp(args[0], builtin_str[i]) == 0) {
+      return (*builtin_func[i])(args);
+    }
+  }
+
+  return c_shell_launch(args);
+}
+
+#define c_shell_RL_BUFSIZE 1024
+/**
+   @brief Read a line of input from stdin.
+   @return The line from stdin.
+ */
+char *c_shell_read_line(void)
+{
+  int bufsize = c_shell_RL_BUFSIZE;
   int position = 0;
   char *buffer = malloc(sizeof(char) * bufsize);
   int c;
 
   if (!buffer) {
-    fprintf(stderr, "c_shell: memory allocation error\n");
+    fprintf(stderr, "c_shell: allocation error\n");
     exit(EXIT_FAILURE);
   }
 
@@ -69,96 +171,88 @@ char *read_a_line(void)
 
     // If we have exceeded the buffer, reallocate.
     if (position >= bufsize) {
-      bufsize += C_SHELL_BUFFERSIZE;
+      bufsize += c_shell_RL_BUFSIZE;
       buffer = realloc(buffer, bufsize);
       if (!buffer) {
-        fprintf(stderr, "c_shell: memory allocation error\n");
+        fprintf(stderr, "c_shell: allocation error\n");
         exit(EXIT_FAILURE);
       }
     }
   }
 }
 
-/*
-The same function above can be implementd using getline() in stdio.h
-char *read__a_line(void)
+#define c_shell_TOK_BUFSIZE 64
+#define c_shell_TOK_DELIM " \t\r\n\a"
+/**
+   @brief Split a line into tokens (very naively).
+   @param line The line.
+   @return Null-terminated array of tokens.
+ */
+char **c_shell_split_line(char *line)
 {
-  char *line = NULL;
-  ssize_t bufsize = 0; // have getline allocate a buffer for us
-  getline(&line, &bufsize, stdin);
-  return line;
-}
-*/
-
-#define C_SHELL_TOK_BUFSIZE 64
-#define C_SHELL_TOK_DELIM " \t\r\n\a"
-char **split_a_line(char *line)
-{
-  int bufsize = C_SHELL_TOK_BUFSIZE, position = 0;
+  int bufsize = c_shell_TOK_BUFSIZE, position = 0;
   char **tokens = malloc(bufsize * sizeof(char*));
   char *token;
 
   if (!tokens) {
-    fprintf(stderr, "c_shell: memory allocation error\n");
+    fprintf(stderr, "c_shell: allocation error\n");
     exit(EXIT_FAILURE);
   }
-  /*
-   Begin tokenizing by calling strtok. 
-  It returns a pointer to the first token. 
-   strtok() actually does is return pointers to within the string you give it, 
-  and place \0 bytes at the end of each token. 
-  We store each pointer in an array (buffer) of character pointers
-  */
-  token = strtok(line, C_SHELL_TOK_DELIM);
+
+  token = strtok(line, c_shell_TOK_DELIM);
   while (token != NULL) {
     tokens[position] = token;
     position++;
 
     if (position >= bufsize) {
-      bufsize += C_SHELL_TOK_BUFSIZE;
+      bufsize += c_shell_TOK_BUFSIZE;
       tokens = realloc(tokens, bufsize * sizeof(char*));
       if (!tokens) {
-        fprintf(stderr, "c_shell: memory allocation error\n");
+        fprintf(stderr, "c_shell: allocation error\n");
         exit(EXIT_FAILURE);
       }
     }
 
-    token = strtok(NULL, C_SHELL_TOK_DELIM);
+    token = strtok(NULL, c_shell_TOK_DELIM);
   }
   tokens[position] = NULL;
   return tokens;
 }
 
-/*
-This particular variant of exec() that is execvp expects a program name and an array 
-also called a vector, hence the ‘v’ of string arguments 
-the first one has to be the program name. 
-The ‘p’ means that instead of providing the full file path of the program to run, 
-we’re going to give its name, 
-and let the operating system search for the program in the path
-*/
-int shell_launch(char **args)
+/**
+   @brief Loop getting input and executing it.
+ */
+void c_shell_loop(void)
 {
-  pid_t pid, wpid;
+  char *line;
+  char **args;
   int status;
 
-  pid = fork();
-  if (pid == 0) {
-    // Child process
-    if (execvp(args[0], args) == -1) {
-      perror("c_shell:");
-    }
-    exit(EXIT_FAILURE);
-  } else if (pid < 0) {
-    // Error forking
-    perror("c_shell:");
-  } else {
-    // Parent process
-    do {
-      wpid = waitpid(pid, &status, WUNTRACED);
-    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
-  }
+  do {
+    printf("> ");
+    line = c_shell_read_line();
+    args = c_shell_split_line(line);
+    status = c_shell_execute(args);
 
-  return 1;
+    free(line);
+    free(args);
+  } while (status);
 }
 
+/**
+   @brief Main entry point.
+   @param argc Argument count.
+   @param argv Argument vector.
+   @return status code
+ */
+int main(int argc, char **argv)
+{
+  // Load config files, if any.
+
+  // Run command loop.
+  c_shell_loop();
+
+  // Perform any shutdown/cleanup.
+
+  return EXIT_SUCCESS;
+}
