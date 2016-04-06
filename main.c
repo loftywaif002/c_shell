@@ -102,7 +102,13 @@ char **split_a_line(char *line)
     fprintf(stderr, "c_shell: memory allocation error\n");
     exit(EXIT_FAILURE);
   }
-
+  /*
+   Begin tokenizing by calling strtok. 
+  It returns a pointer to the first token. 
+   strtok() actually does is return pointers to within the string you give it, 
+  and place \0 bytes at the end of each token. 
+  We store each pointer in an array (buffer) of character pointers
+  */
   token = strtok(line, C_SHELL_TOK_DELIM);
   while (token != NULL) {
     tokens[position] = token;
