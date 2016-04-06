@@ -128,3 +128,37 @@ char **split_a_line(char *line)
   tokens[position] = NULL;
   return tokens;
 }
+
+/*
+This particular variant of exec() that is execvp expects a program name and an array 
+also called a vector, hence the ‘v’ of string arguments 
+the first one has to be the program name. 
+The ‘p’ means that instead of providing the full file path of the program to run, 
+we’re going to give its name, 
+and let the operating system search for the program in the path
+*/
+int shell_launch(char **args)
+{
+  pid_t pid, wpid;
+  int status;
+
+  pid = fork();
+  if (pid == 0) {
+    // Child process
+    if (execvp(args[0], args) == -1) {
+      perror("c_shell:");
+    }
+    exit(EXIT_FAILURE);
+  } else if (pid < 0) {
+    // Error forking
+    perror("c_shell:");
+  } else {
+    // Parent process
+    do {
+      wpid = waitpid(pid, &status, WUNTRACED);
+    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+  }
+
+  return 1;
+}
+
